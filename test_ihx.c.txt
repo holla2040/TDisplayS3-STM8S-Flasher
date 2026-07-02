@@ -1,0 +1,35 @@
+// Host-side check for the IHX parser (the only logic testable off-target).
+// Named .c.txt so arduino-cli ignores it. Run:
+//   cp test_ihx.c.txt /tmp/test_ihx.c && gcc -x c /tmp/test_ihx.c ihx.cpp -I. -o /tmp/test_ihx && /tmp/test_ihx
+#include <assert.h>
+#include <stdio.h>
+#include "ihx.h"
+
+int main(void) {
+  unsigned char img[256];
+
+  // two data records at 0x8000/0x8004 + EOF (valid checksums)
+  const char *good =
+    ":048000005AB6500616\n"
+    ":04800400AE1234562E\n"
+    ":00000001FF\n";
+  size_t n = ihx_parse(good, 0x8000, img, sizeof(img));
+  assert(n == 8);
+  assert(img[0] == 0x5A && img[3] == 0x06);
+  assert(img[4] == 0xAE && img[7] == 0x56);
+
+  // gap stays 0xFF
+  const char *gap = ":018000005A25\n:01800200B6C7\n:00000001FF\n";
+  n = ihx_parse(gap, 0x8000, img, sizeof(img));
+  assert(n == 3 && img[1] == 0xFF);
+
+  // bad checksum rejected
+  assert(ihx_parse(":048000005AB6500600\n:00000001FF\n", 0x8000, img, sizeof(img)) == 0);
+  // address below base rejected
+  assert(ihx_parse(":0100000000FF\n:00000001FF\n", 0x8000, img, sizeof(img)) == 0);
+  // empty image (EOF only) -> 0
+  assert(ihx_parse(":00000001FF\n", 0x8000, img, sizeof(img)) == 0);
+
+  printf("ihx: all checks pass\n");
+  return 0;
+}
