@@ -34,22 +34,29 @@ static bool write_reg(uint16_t addr, uint8_t val) {
   return swim_wotf(addr, &val, 1);
 }
 
+// 3 attempts before giving up: a single flaky entry or un-acked frame must
+// not read as "no target" — the target is offline only if all three fail.
 bool stm8_connect() {
-  swim_reset_target(true);
-  delay(2);
-  if (!swim_entry()) { swim_reset_target(false); return false; }
-  if (!write_reg(SWIM_CSR, CSR_SAFE_MASK | CSR_SWIM_DM)) {
-    Serial.println("stm8: SWIM_CSR write failed (entry ok, frames not acked)");
-    return false;
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    if (attempt > 1) Serial.printf("stm8: connect retry %d/3\n", attempt);
+    swim_reset_target(true);
+    delay(2);
+    if (!swim_entry()) { swim_reset_target(false); continue; }
+    if (!write_reg(SWIM_CSR, CSR_SAFE_MASK | CSR_SWIM_DM)) {
+      Serial.println("stm8: SWIM_CSR write failed (entry ok, frames not acked)");
+      swim_reset_target(false);
+      continue;
+    }
+    swim_reset_target(false);
+    delay(2);
+    if (!write_reg(DM_CSR2, DM_CSR2_STALL)) {  // halt the core before touching flash
+      Serial.println("stm8: CPU stall (DM_CSR2) write failed");
+      continue;
+    }
+    Serial.println("stm8: connected, core stalled");
+    return true;
   }
-  swim_reset_target(false);
-  delay(2);
-  if (!write_reg(DM_CSR2, DM_CSR2_STALL)) {  // halt the core before touching flash
-    Serial.println("stm8: CPU stall (DM_CSR2) write failed");
-    return false;
-  }
-  Serial.println("stm8: connected, core stalled");
-  return true;
+  return false;
 }
 
 // 96-bit unique ID at 0x4865 — documented on the STM8S103, absent from the

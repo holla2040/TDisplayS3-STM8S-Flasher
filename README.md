@@ -48,13 +48,31 @@ curl -F ihx=@app.ihx http://STM8Flasher.local/upload
 ```
 
 The Intel HEX file is validated (parse + checksums) before it replaces the
-stored image, and persists on the jig's flash across reboots.
+stored image, and persists on the jig's flash across reboots. A successful
+upload immediately flashes the connected target with the new image (no button
+press needed); with no target connected the jig just carries on.
+
+### Build id
+
+The home screen shows the *connected chip's* build id next to the detected
+type: when a target (re)connects, its flash is read out over SWIM and scanned
+for the magic string `GITHASH:`; the printable characters that follow are the
+build id. Disconnecting the target hides it, and a chip without the magic
+shows none. After a passing flash the id is taken from the just-written image
+(the verify proves they match) instead of a re-read. To embed one, compile a
+plain string into the target firmware, e.g.:
+
+```c
+const char build_id[] = "GITHASH:" GIT_HASH;   /* -DGIT_HASH='"abc1234"' from the Makefile */
+```
+
+with the Makefile passing `-DGIT_HASH='"$(shell git rev-parse --short HEAD)"'`.
 
 ## Operation
 
 Two screens. **Home** shows the live-detected target on line 1 (`no target`,
 `STM8S103`, or `STM8S003` — probed once a second via SWIM entry + the 96-bit
-UID at 0x4865), image size and build id, pass/fail counters, mode letter
+UID at 0x4865) with that chip's build id, image size, pass/fail counters, mode letter
 (`M`/`A`) top right, and IP address. **Flash** shows write/read progress in
 bytes and ends with a green PASS or red FAIL bar that holds for 10 seconds
 (press the flash button during the hold to retest immediately).
