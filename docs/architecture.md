@@ -62,7 +62,7 @@ WAITING ──sync pulse received──▶ CONNECT (SWIM_CSR, stall core)
   ▲  ▲                              │
   │  │ comm error: retry quietly ◀──┼── UNLOCK → PROGRAM → VERIFY
   │  │                                              │        │
-  │ button press                    PASS 2 s ◀── match   mismatch ──▶ FAIL 10 s
+  │ button press                    PASS 5 s ◀── match   mismatch ──▶ FAIL 5 s
   │  │                                │                               │
   └──┴─────── SWAP TARGET ◀───────────┴───────────────────────────────┘
 ```

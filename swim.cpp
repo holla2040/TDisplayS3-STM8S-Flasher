@@ -14,11 +14,16 @@
 // before trusting on hardware. Structure is right; calibrate the numbers.
 // ---------------------------------------------------------------------------
 #define CPU_MHZ 240
-static const uint32_t T_SWIM      = CPU_MHZ / 8;    // one SWIM clock, in CPU cycles
-static const uint32_t BIT_TOTAL   = 22 * T_SWIM;
-static const uint32_t BIT_LONG    = 20 * T_SWIM;
-static const uint32_t BIT_SHORT   = 2 * T_SWIM;
-static const uint32_t BIT_HALF    = 11 * T_SWIM;    // low-width threshold: shorter = '1'
+// Bit timing is recalibrated from the measured sync pulse at every entry:
+// HSI tolerance puts real targets several % off the nominal 8 MHz, which is
+// enough to corrupt frames over a 22-clock bit. Defaults assume 8 MHz.
+static uint32_t BIT_TOTAL, BIT_LONG, BIT_SHORT, BIT_HALF;
+static void set_timing(uint32_t t_swim) {   // t_swim = one SWIM clock, in CPU cycles
+  BIT_TOTAL = 22 * t_swim;
+  BIT_LONG  = 20 * t_swim;
+  BIT_SHORT = 2 * t_swim;
+  BIT_HALF  = 11 * t_swim;                  // low-width threshold: shorter = '1'
+}
 static const uint32_t ACK_TIMEOUT = 200 * CPU_MHZ;  // 200 us: target may stretch before ACK
 
 #define SWIM_CMD_SRST 0x00
@@ -39,6 +44,7 @@ static inline void wait_from(uint32_t start, uint32_t cycles) {
 }
 
 void swim_init() {
+  set_timing(CPU_MHZ / 8);
   // Internal pull-ups (~45k) so the lines idle high even with nothing else
   // on them — but that's far too weak for SWIM's rise times. A real ~1k
   // pull-up from SWIM to target VDD is required for reliable comms.
@@ -220,11 +226,13 @@ bool swim_entry() {
       return false;
     }
   }
-  uint32_t low_us = (cyc() - fall) / CPU_MHZ;
-  // ponytail: fixed 8 MHz SWIM clock assumed; use measured sync width to
-  // scale bit timing if HSI tolerance causes frame errors in production.
+  uint32_t low_cycles = cyc() - fall;
+  uint32_t low_us = low_cycles / CPU_MHZ;
   bool ok = low_us > 8 && low_us < 40;
   Serial.printf("swim: sync pulse %lu us after %lu us%s\n",
                 low_us, (fall - t0) / CPU_MHZ, ok ? "" : " (expected 8-40 us)");
+  // Sync pulse is 128 SWIM clocks: derive the target's real clock from it
+  // so bit timing tracks this chip's HSI instead of the nominal 8 MHz.
+  if (ok) set_timing((low_cycles + 64) / 128);
   return ok;
 }

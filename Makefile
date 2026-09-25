@@ -1,4 +1,6 @@
+.DEFAULT_GOAL := bin
 ip=STM8Flasher.local
+port ?= /dev/ttyACM0
 BIN := $(wildcard /tmp/arduino-build/*.ino.bin)
 
 
@@ -19,7 +21,10 @@ usb:
 
 serial:
 	- pkill -9 -f microcom
-	arduino-cli upload -p /dev/ttyACM0 --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc /tmp/arduino-build --input-dir /tmp/arduino-build
+	arduino-cli upload -p $(port) --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc /tmp/arduino-build --input-dir /tmp/arduino-build
+
+clean:
+	rm -rf /tmp/arduino-build
 
 ota:
 	python3 "/home/holla/.arduino15/packages/esp32/hardware/esp32/3.3.0/tools/espota.py" -r -i $(ip) -p 3232 --auth=admin -f "$(BIN)"

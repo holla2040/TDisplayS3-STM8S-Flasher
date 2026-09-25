@@ -13,6 +13,7 @@
 #include "ihx.h"
 
 #define PROJECTNAME "STM8Flasher"
+#define RESULT_HOLD_MS 5000   // pass/fail bar hold on the flash page
 
 TFT_eSPI tft = TFT_eSPI();
 WiFiManager wifiManager;
@@ -114,15 +115,15 @@ static void waitRelease(uint8_t pin) {
   }
 }
 
-// Result line at the bottom of the flash page: hold 10 s, then home.
+// Result line at the bottom of the flash page: hold RESULT_HOLD_MS, then home.
 // FLASH_BUTTON during the hold cuts it short and requests a retest.
-static void showResult(bool pass, const char *stage) {
+static void showResult(const char *word, uint16_t bg, const char *stage) {
   tft.setCursor(0, 4 * 32, 2);
-  tft.setTextColor(TFT_WHITE, pass ? TFT_DARKGREEN : TFT_RED);
-  tft.printf(" %s %s ", pass ? "PASS" : "FAIL", stage);
-  Serial.printf("%s: %s\n", pass ? "PASS" : "FAIL", stage);
+  tft.setTextColor(TFT_WHITE, bg);
+  tft.printf(" %s %s ", word, stage);
+  Serial.printf("%s: %s\n", word, stage);
   uint32_t start = millis();
-  while (millis() - start < 10000) {
+  while (millis() - start < RESULT_HOLD_MS) {
     if (!digitalRead(FLASH_BUTTON)) {
       waitRelease(FLASH_BUTTON);
       wantRetest = true;
@@ -229,17 +230,31 @@ static bool flashCycle() {
   stm8_run();
   v ? passCount++ : failCount++;
   if (v) strcpy(targetHash, fwHash);   // verify passed: chip provably carries the image
-  showResult(v, v ? "done" : "verify mismatch");
+  showResult(v ? "PASS" : "FAIL", v ? TFT_DARKGREEN : TFT_RED,
+             v ? "done" : "verify mismatch");
   return true;
+}
+
+// One verdicted flash: up to 3 flashCycle attempts, reconnecting between comm
+// errors. If no attempt reaches a verdict, show an orange notice — NOT a red
+// FAIL (that's reserved for verify mismatch) — instead of silently going home.
+static bool flashWithRetry() {
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    if (flashCycle()) return true;
+    Serial.printf("flash: comm error, attempt %d/3\n", attempt);
+    if (attempt < 3 && !stm8_connect()) break;
+  }
+  showResult("comm error", TFT_ORANGE, "no verdict");
+  return false;
 }
 
 // Flash, honor retest presses during the result hold, then home.
 static void runTests() {
-  flashCycle();
+  flashWithRetry();
   while (wantRetest) {
     wantRetest = false;
     if (!stm8_connect()) { swim_reset_target(false); break; }
-    flashCycle();
+    flashWithRetry();
   }
   showHome();
 }

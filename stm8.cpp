@@ -94,7 +94,7 @@ static bool wait_eop(const stm8_device_t *dev) {
   uint32_t start = millis();
   uint8_t iapsr = 0;
   while (millis() - start < 20) {
-    if (!swim_rotf(dev->regs_iapsr, &iapsr, 1)) return false;
+    if (!swim_rotf(dev->regs_iapsr, &iapsr, 1)) continue;  // flaky read: keep polling
     if (iapsr & IAPSR_EOP) return true;
   }
   Serial.printf("stm8: EOP timeout, IAPSR=0x%02X\n", iapsr);
@@ -120,8 +120,16 @@ bool stm8_program(const stm8_device_t *dev, const uint8_t *image, size_t len,
     if (dev->has_ncr2 && !write_reg(dev->regs_ncr2, (uint8_t)~CR2_PRG)) return false;
     if (!swim_wotf(dev->flash_start + off, block, dev->block_size)) return false;
     if (!wait_eop(dev)) {
-      Serial.printf("stm8: block @ 0x%06lX failed\n", dev->flash_start + off);
-      return false;
+      // EOP is cleared-by-read: one corrupted IAPSR poll can eat the flag on
+      // a block that programmed fine. Read the block back to settle it.
+      uint8_t check[128];
+      if (!swim_rotf(dev->flash_start + off, check, dev->block_size) ||
+          memcmp(check, block, dev->block_size) != 0) {
+        Serial.printf("stm8: block @ 0x%06lX failed\n", dev->flash_start + off);
+        return false;
+      }
+      Serial.printf("stm8: block @ 0x%06lX ok on readback (EOP missed)\n",
+                    dev->flash_start + off);
     }
     if (progress) progress(min(off + dev->block_size, len), len);
   }

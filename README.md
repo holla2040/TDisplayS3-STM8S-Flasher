@@ -74,11 +74,13 @@ Two screens. **Home** shows the live-detected target on line 1 (`no target`,
 `STM8S103`, or `STM8S003` — probed once a second via SWIM entry + the 96-bit
 UID at 0x4865) with that chip's build id, image size, pass/fail counters, mode letter
 (`M`/`A`) top right, and IP address. **Flash** shows write/read progress in
-bytes and ends with a green PASS or red FAIL bar that holds for 10 seconds
+bytes and ends with a green PASS or red FAIL bar that holds for 5 seconds
 (press the flash button during the hold to retest immediately).
 
 FAIL means exactly one thing: the read-back didn't match the image. A missing
-target or a communication hiccup is never a FAIL — the jig just keeps trying.
+target or a communication hiccup is never a FAIL — the jig retries the whole
+cycle up to 3 times, and if none reaches a verdict it shows an orange
+`comm error` notice (distinct from the red FAIL bar) before returning home.
 
 ## Status
 

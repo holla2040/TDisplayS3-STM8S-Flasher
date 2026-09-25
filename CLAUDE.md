@@ -40,10 +40,11 @@ Serial debug: 115200 on /dev/ttyACM0. The jig hosts http://STM8Flasher.local/
 ## Behavior contracts (user-specified, don't regress)
 
 - FAIL means verify mismatch ONLY. No target / entry failure / comm errors
-  retry quietly — never shown as FAIL.
+  retry quietly — never shown as FAIL. A flash that gets comm errors 3x in a
+  row shows an orange "comm error" notice (flashWithRetry), not a FAIL.
 - Home line 1 = live detected target ("no target" / STM8S103 / STM8S003 via
   UID probe at 0x4865, polled every 1 s in both modes), NOT the configured name.
-- Result holds on the flash page 10 s (pass and fail); FLASH_BUTTON during
+- Result holds on the flash page 5 s (pass and fail); FLASH_BUTTON during
   the hold retests immediately.
 - The jig powers the target: no VDD sensing; SWIM entry IS target detection.
 - WiFi is secondary — flashing must never wait on it (WiFiManager non-blocking).
