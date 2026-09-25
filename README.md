@@ -20,7 +20,7 @@ and gets PASS/FAIL on the display.
 For 5 V targets add a BSS138-style open-drain level shifter on SWIM and NRST —
 ESP32 pins are not 5 V tolerant.
 
-Buttons (on-board): GPIO0 (BOOT) toggles manual/auto mode, and held at power-up
+Buttons (on-board): GPIO0 (BOOT) toggles auto (default)/manual mode, and held at power-up
 resets WiFi credentials. GPIO14 (KEY) triggers a flash in manual mode.
 
 ## Build and deploy
@@ -52,28 +52,13 @@ stored image, and persists on the jig's flash across reboots. A successful
 upload immediately flashes the connected target with the new image (no button
 press needed); with no target connected the jig just carries on.
 
-### Build id
-
-The home screen shows the *connected chip's* build id next to the detected
-type: when a target (re)connects, its flash is read out over SWIM and scanned
-for the magic string `GITHASH:`; the printable characters that follow are the
-build id. Disconnecting the target hides it, and a chip without the magic
-shows none. After a passing flash the id is taken from the just-written image
-(the verify proves they match) instead of a re-read. To embed one, compile a
-plain string into the target firmware, e.g.:
-
-```c
-const char build_id[] = "GITHASH:" GIT_HASH;   /* -DGIT_HASH='"abc1234"' from the Makefile */
-```
-
-with the Makefile passing `-DGIT_HASH='"$(shell git rev-parse --short HEAD)"'`.
-
 ## Operation
 
 Two screens. **Home** shows the live-detected target on line 1 (`no target`,
 `STM8S103`, or `STM8S003` — probed once a second via SWIM entry + the 96-bit
-UID at 0x4865) with that chip's build id, image size, pass/fail counters, mode letter
-(`M`/`A`) top right, and IP address. **Flash** shows write/read progress in
+UID at 0x4865), image size, pass/fail counters, mode letter
+(`M`/`A`) top right, and IP address. In auto mode every newly inserted target
+is flashed once. **Flash** shows write/read progress in
 bytes and ends with a green PASS or red FAIL bar that holds for 5 seconds
 (press the flash button during the hold to retest immediately).
 

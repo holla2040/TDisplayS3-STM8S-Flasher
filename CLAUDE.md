@@ -18,7 +18,7 @@ Serial debug: 115200 on /dev/ttyACM0. The jig hosts http://STM8Flasher.local/
 ## Layout
 
 - `TDisplayS3-STM8S-Flasher.ino` — UI (2 pages: home, flash), state machine,
-  wifi/OTA/mDNS/webserver, FFat image storage. Manual/auto mode: MODE_BUTTON
+  wifi/OTA/mDNS/webserver, FFat image storage. Auto mode default (no buttons on the enclosure); MODE_BUTTON
   (GPIO0) toggles, FLASH_BUTTON (GPIO14) tests; buttons act on debounced
   release (a press must not spill into the next page and double-fire).
 - `swim.cpp/h` — bit-banged SWIM wire driver (entry, sync, pulse-width bits,
@@ -26,14 +26,6 @@ Serial debug: 115200 on /dev/ttyACM0. The jig hosts http://STM8Flasher.local/
   sections, direct GPIO register access.
 - `stm8.cpp/h` — device table, flash unlock/block-program/verify, UID probe.
 - `ihx.cpp/h` — Intel HEX parser (host-testable: see test_ihx.c.txt header).
-- Build id: scanHash() finds the "GITHASH:" magic and keeps the printable
-  chars that follow. Two hashes: fwHash (from the ihx image on every parse,
-  internal only) and targetHash (read out of the connected chip's flash over
-  SWIM on reconnect, shown on home next to the detected type, cleared on
-  disconnect). A verify PASS copies fwHash into targetHash instead of
-  re-reading; any flash attempt clears it first. Target firmware embeds it as
-  `const char build_id[] = "GITHASH:" GIT_HASH;` with the hash passed in by its
-  Makefile (`git rev-parse --short HEAD`) — see comet src/firmware.
 - `config.h` — pins: SWIM=GPIO1, NRST=GPIO2. 1k external pull-up SWIM→3.3V
   required (internal ~45k is too weak for SWIM rise times).
 
@@ -47,6 +39,11 @@ Serial debug: 115200 on /dev/ttyACM0. The jig hosts http://STM8Flasher.local/
 - Result holds on the flash page 5 s (pass and fail); FLASH_BUTTON during
   the hold retests immediately.
 - The jig powers the target: no VDD sensing; SWIM entry IS target detection.
+- Auto mode flashes every inserted target, once per insertion (`flashed`,
+  cleared on disconnect; comm errors leave it clear so it retries). No reading
+  of the chip's existing firmware or build id — it's a flasher, not a reader.
+  Never reflash a chip that stays in the jig (S003 flash endurance is 100
+  cycles).
 - WiFi is secondary — flashing must never wait on it (WiFiManager non-blocking).
 
 ## Current state / caveats

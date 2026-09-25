@@ -29,52 +29,16 @@ static uint8_t image[32 * 1024];
 static size_t imageLen = 0;
 static uint32_t passCount = 0, failCount = 0;
 
-// Firmware build id: images carry "GITHASH:<short-hash>" as a plain string
-// (see comet src/firmware/main.c build_id). Empty if none found.
-// fwHash = hash inside the loaded ihx image (internal); targetHash = hash
-// read out of the connected chip's flash, shown on the home page and cleared
-// whenever the target disconnects.
-static char fwHash[16] = "";
-static char targetHash[16] = "";
-
-static void scanHash(const uint8_t *buf, size_t len, char *out, size_t outsz) {
-  out[0] = 0;
-  if (len < 9) return;
-  for (size_t i = 0; i <= len - 9; i++) {
-    if (!memcmp(buf + i, "GITHASH:", 8)) {
-      size_t j = i + 8, k = 0;
-      while (k < outsz - 1 && j < len && buf[j] >= ' ' && buf[j] < 127)
-        out[k++] = buf[j++];
-      out[k] = 0;
-      return;
-    }
-  }
-}
-
-// Read the connected target's flash over SWIM and scan it for a build id.
-// Caller must hold a live connection (stm8_connect succeeded, core stalled).
-// ponytail: full flash read, seconds at low-speed SWIM; per-chunk early-exit
-// scan if that's too slow on the bench.
-static void readTargetHash() {
-  static uint8_t buf[8 * 1024];   // S003/S103 flash; larger parts scan the first 8K
-  targetHash[0] = 0;
-  size_t n = min((size_t)target->flash_size, sizeof(buf));
-  for (size_t off = 0; off < n; off += 1024) {
-    if (!swim_rotf(target->flash_start + off, buf + off, min((size_t)1024, n - off))) {
-      Serial.println("target hash: flash read failed");
-      return;
-    }
-  }
-  scanHash(buf, n, targetHash, sizeof(targetHash));
-  Serial.printf("target hash: %s\n", targetHash[0] ? targetHash : "(none)");
-}
+// Auto mode flashes once per insertion: set once a flash reaches a verdict,
+// cleared when the target disconnects. Comm errors leave it clear (retry).
+static bool flashed = false;
 
 // WiFi is secondary: the jig flashes with or without it. WiFiManager runs
 // non-blocking; OTA + mDNS start whenever a connection eventually appears.
 static bool netUp = false;
 
 static uint32_t lastPoll = 0;
-static bool autoMode = false;  // default manual; MODE_BUTTON toggles
+static bool autoMode = true;   // default auto (enclosure has no buttons); MODE_BUTTON toggles
 static const char *detected = "no target";   // live probe result, home page line 1
 
 // Home page: status + waiting for the next target.
@@ -83,13 +47,13 @@ static void showHome() {
   tft.setCursor(0, 0, 2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  // live detection + the connected chip's own build id (blank when no target)
-  tft.printf("%s %s\n", detected, targetHash);
+  // live detection
+  tft.println(detected);
   if (imageLen) tft.printf("ihx %u\n", (unsigned)imageLen);
   else tft.println("no image: browse to");
   tft.printf("pass %lu fail %lu\n", passCount, failCount);
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.println(autoMode ? "waiting for target..." : "press button to flash");
+  // tft.println(autoMode ? "waiting for target..." : "press button to flash");
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   if (netUp) tft.println(WiFi.localIP());
   else tft.println("wifi: setup AP " PROJECTNAME);
@@ -97,7 +61,7 @@ static void showHome() {
   // mode letter, upper right (drawString: no print-wrap involved)
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.setTextDatum(TR_DATUM);
-  tft.drawString(autoMode ? "A" : "M", tft.width() - 2, 0, 2);
+  tft.drawString(autoMode ? "A" : "M", tft.width() - 6, 0, 2);   // enclosure covers the right edge
   tft.setTextDatum(TL_DATUM);
 }
 
@@ -148,7 +112,6 @@ static bool loadImage(const char *path) {
   free(text);
   if (!n) return false;
   imageLen = n;
-  scanHash(image, imageLen, fwHash, sizeof(fwHash));
   return true;
 }
 
@@ -204,7 +167,6 @@ static void readProgress(size_t done, size_t total) {
 // Returns false on a communication hiccup: no verdict, caller just retries.
 // FAIL means one thing only: the readback didn't match the image.
 static bool flashCycle() {
-  targetHash[0] = 0;   // chip content unknown until verify passes
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
@@ -229,7 +191,6 @@ static bool flashCycle() {
 
   stm8_run();
   v ? passCount++ : failCount++;
-  if (v) strcpy(targetHash, fwHash);   // verify passed: chip provably carries the image
   showResult(v ? "PASS" : "FAIL", v ? TFT_DARKGREEN : TFT_RED,
              v ? "done" : "verify mismatch");
   return true;
@@ -250,11 +211,11 @@ static bool flashWithRetry() {
 
 // Flash, honor retest presses during the result hold, then home.
 static void runTests() {
-  flashWithRetry();
+  flashed = flashWithRetry();
   while (wantRetest) {
     wantRetest = false;
     if (!stm8_connect()) { swim_reset_target(false); break; }
-    flashWithRetry();
+    flashed = flashWithRetry();
   }
   showHome();
 }
@@ -352,7 +313,6 @@ void loop() {
     if (!stm8_connect()) {
       swim_reset_target(false);
       detected = "no target";
-      targetHash[0] = 0;
       Serial.println("manual: no target answered");
       showHome();
       tft.setCursor(0, 3 * 32, 2);
@@ -362,13 +322,13 @@ void loop() {
     }
     detected = stm8_uid_present(false) ? "STM8S103" : "STM8S003";
     if (imageLen) runTests();
-    else { readTargetHash(); stm8_run(); showHome(); }
+    else { stm8_run(); showHome(); }
     return;
   }
 
-  // Live detection probe, both modes, once a second. In auto mode a hit
-  // rolls straight into the flash cycle; in manual it only updates line 1
-  // and releases the target to run again.
+  // Live detection probe, both modes, once a second. In auto mode a newly
+  // inserted target rolls straight into the flash cycle (once per insertion);
+  // otherwise it only updates line 1 and releases the target to run again.
   if (millis() - lastPoll < 1000) return;
   lastPoll = millis();
 
@@ -376,17 +336,12 @@ void loop() {
   if (!stm8_connect()) {
     swim_reset_target(false);
     detected = "no target";
-    targetHash[0] = 0;   // disconnect hides the hash
+    flashed = false;     // next insertion gets flashed
   } else {
-    bool reconnect = !strcmp(prev, "no target");
     detected = stm8_uid_present(false) ? "STM8S103" : "STM8S003";
-    if (autoMode && imageLen) {
+    if (autoMode && imageLen && !flashed) {
       runTests();
       return;
-    }
-    if (reconnect) {
-      showHome();          // paint detection now; the flash read below takes seconds
-      readTargetHash();
     }
     stm8_run();   // probe only: reset target and let it run
   }
