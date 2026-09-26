@@ -5,15 +5,17 @@
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <FFat.h>
+#include <Update.h>
 #include <TFT_eSPI.h>
 
 #include "config.h"
 #include "swim.h"
 #include "stm8.h"
 #include "ihx.h"
+#include "webpage.h"
 
 #define PROJECTNAME "STM8Flasher"
-#define RESULT_HOLD_MS 5000   // pass/fail bar hold on the flash page
+#define RESULT_HOLD_MS 1000   // pass/fail bar hold on the flash page
 
 TFT_eSPI tft = TFT_eSPI();
 WiFiManager wifiManager;
@@ -116,13 +118,55 @@ static bool loadImage(const char *path) {
 }
 
 static void handleRoot() {
-  char page[384];
-  snprintf(page, sizeof(page),
-    "<h1>" PROJECTNAME "</h1><p>%s, image %u bytes, pass %lu fail %lu</p>"
-    "<form method='POST' action='/upload' enctype='multipart/form-data'>"
-    "<input type='file' name='ihx'> <input type='submit' value='upload'></form>",
-    target->name, (unsigned)imageLen, passCount, failCount);
-  server.send(200, "text/html", page);
+  server.send(200, "text/html", PAGE);
+}
+
+static void handleStatus() {
+  static String md5 = ESP.getSketchMD5();   // lets the page confirm a firmware update took
+  char json[256];
+  snprintf(json, sizeof(json),
+    "{\"detected\":\"%s\",\"image\":%u,\"pass\":%lu,\"fail\":%lu,\"auto\":%s,"
+    "\"build\":\"" __DATE__ " " __TIME__ "\",\"md5\":\"%s\"}",
+    detected, (unsigned)imageLen, passCount, failCount, autoMode ? "true" : "false", md5.c_str());
+  server.send(200, "application/json", json);
+}
+
+// Flasher self-update: stream the .ino.bin into the spare OTA slot. Update
+// rejects anything not starting with the ESP image magic byte.
+static void handleUpdateChunk() {
+  HTTPUpload &up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    tft.fillScreen(TFT_BLACK);
+    tft.setCursor(0, 0, 2);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.println("updating flasher");
+    Serial.printf("firmware update: %s\n", up.filename.c_str());
+    Update.begin(UPDATE_SIZE_UNKNOWN);
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    Update.write(up.buf, up.currentSize);
+  } else if (up.status == UPLOAD_FILE_END) {
+    Update.end(true);
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+  }
+}
+
+static void handleUpdateDone() {
+  if (Update.hasError() || !Update.isFinished()) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Update failed: %s. The flasher kept its current firmware.",
+             Update.errorString());
+    Serial.println(msg);
+    server.send(500, "text/plain", msg);
+    Update.abort();
+    showHome();
+    return;
+  }
+  server.sendHeader("Connection", "close");
+  server.send(200, "text/plain", "ok: restarting\n");
+  Serial.println("firmware update ok, restarting");
+  delay(300);
+  ESP.restart();
 }
 
 static void handleUploadChunk() {
@@ -136,7 +180,7 @@ static void handleUploadDone() {
   if (!loadImage(UPLOAD_TMP)) {
     FFat.remove(UPLOAD_TMP);
     if (!loadImage(IMAGE_PATH)) imageLen = 0;   // restore previous image to RAM
-    server.send(400, "text/plain", "not a valid ihx, kept previous image\n");
+    server.send(400, "text/plain", "That file isn't valid Intel HEX. The previous target image is still loaded.\n");
     return;
   }
   FFat.remove(IMAGE_PATH);
@@ -254,7 +298,9 @@ void setup() {
   wifiManager.autoConnect(PROJECTNAME);    // returns immediately; flashing never waits on wifi
 
   server.on("/", HTTP_GET, handleRoot);
+  server.on("/status", HTTP_GET, handleStatus);
   server.on("/upload", HTTP_POST, handleUploadDone, handleUploadChunk);
+  server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateChunk);
 
   FFat.begin(true);                        // format on first boot
   if (!loadImage(IMAGE_PATH))

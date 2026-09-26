@@ -13,7 +13,8 @@ ArduinoOTA. See docs/architecture.md for the full design.
 - `make image IHX=path/to/app.ihx` — push a target firmware image to the flasher
 
 Serial debug: 115200 on /dev/ttyACM0. The jig hosts http://STM8Flasher.local/
-(status + ihx upload form); images persist in FFat as /firmware.ihx.
+(live status, target .ihx upload, flasher firmware update; see
+flashing-shop.md); images persist in FFat as /firmware.ihx.
 
 ## Layout
 
@@ -25,6 +26,7 @@ Serial debug: 115200 on /dev/ttyACM0. The jig hosts http://STM8Flasher.local/
   parity/ACK frames, ROTF/WOTF/SRST). Cycle-counted timing in critical
   sections, direct GPIO register access.
 - `stm8.cpp/h` — device table, flash unlock/block-program/verify, UID probe.
+- `webpage.h` — the web page (PROGMEM HTML); /status JSON, /upload (.ihx), /update (.ino.bin).
 - `ihx.cpp/h` — Intel HEX parser (host-testable: see test_ihx.c.txt header).
 - `config.h` — pins: SWIM=GPIO1, NRST=GPIO2. 1k external pull-up SWIM→3.3V
   required (internal ~45k is too weak for SWIM rise times).
@@ -36,7 +38,7 @@ Serial debug: 115200 on /dev/ttyACM0. The jig hosts http://STM8Flasher.local/
   row shows an orange "comm error" notice (flashWithRetry), not a FAIL.
 - Home line 1 = live detected target ("no target" / STM8S103 / STM8S003 via
   UID probe at 0x4865, polled every 1 s in both modes), NOT the configured name.
-- Result holds on the flash page 5 s (pass and fail); FLASH_BUTTON during
+- Result holds on the flash page 1 s (pass and fail); FLASH_BUTTON during
   the hold retests immediately.
 - The jig powers the target: no VDD sensing; SWIM entry IS target detection.
 - Auto mode flashes every inserted target, once per insertion (`flashed`,

@@ -59,7 +59,7 @@ Two screens. **Home** shows the live-detected target on line 1 (`no target`,
 UID at 0x4865), image size, pass/fail counters, mode letter
 (`M`/`A`) top right, and IP address. In auto mode every newly inserted target
 is flashed once. **Flash** shows write/read progress in
-bytes and ends with a green PASS or red FAIL bar that holds for 5 seconds
+bytes and ends with a green PASS or red FAIL bar that holds for 1 second
 (press the flash button during the hold to retest immediately).
 
 FAIL means exactly one thing: the read-back didn't match the image. A missing
