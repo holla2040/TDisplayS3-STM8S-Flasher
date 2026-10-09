@@ -60,11 +60,12 @@ static void showHome() {
   if (netUp) tft.println(WiFi.localIP());
   else tft.println("wifi: setup AP " PROJECTNAME);
 
-  // mode letter, upper right (drawString: no print-wrap involved)
-  tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.setTextDatum(TR_DATUM);
-  tft.drawString(autoMode ? "A" : "M", tft.width() - 6, 0, 2);   // enclosure covers the right edge
-  tft.setTextDatum(TL_DATUM);
+  // ponytail: mode letter hidden — the enclosure has no button access, so the
+  // jig always runs auto. Toggle code stays; re-enable this if buttons return.
+  // tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  // tft.setTextDatum(TR_DATUM);
+  // tft.drawString(autoMode ? "A" : "M", tft.width() - 6, 0, 2);   // enclosure covers the right edge
+  // tft.setTextDatum(TL_DATUM);
 }
 
 static bool wantRetest = false;

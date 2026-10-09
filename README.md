@@ -8,7 +8,10 @@ and gets PASS/FAIL on the display.
 
 ## Wiring
 
-3.3 V target, direct connection:
+3.3 V target, direct connection. Shown here with the common blue STM8S103F3
+minimum board and its 4-pin SWIM header:
+
+![T-Display S3 to STM8S103 SWIM wiring](docs/wiring.png)
 
 | T-Display S3 | Target STM8 |
 |---|---|
@@ -56,9 +59,9 @@ press needed); with no target connected the jig just carries on.
 
 Two screens. **Home** shows the live-detected target on line 1 (`no target`,
 `STM8S103`, or `STM8S003` — probed once a second via SWIM entry + the 96-bit
-UID at 0x4865), image size, pass/fail counters, mode letter
-(`M`/`A`) top right, and IP address. In auto mode every newly inserted target
-is flashed once. **Flash** shows write/read progress in
+UID at 0x4865), image size, pass/fail counters, and IP address. In auto mode
+(the default; the mode isn't shown on screen, since the enclosure has no
+button access) every newly inserted target is flashed once. **Flash** shows write/read progress in
 bytes and ends with a green PASS or red FAIL bar that holds for 1 second
 (press the flash button during the hold to retest immediately).
 
