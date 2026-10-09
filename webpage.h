@@ -136,7 +136,7 @@ async function status() {
   $('#fail').textContent = s.fail;
   $('#mode').textContent = s.auto ? 'Auto mode: each new target is flashed once.'
                                   : 'Manual mode: press the flash button to flash.';
-  $('#image').textContent = s.image ? `Target image: ${s.image.toLocaleString()} bytes.`
+  $('#image').textContent = s.image ? `Target image: ${s.image.toLocaleString()} bytes, CRC32 ${s.crc}.`
                                     : 'No target image yet. Upload one below.';
   $('#build').textContent = `Flasher firmware built ${s.build}`;
   md5 = s.md5;

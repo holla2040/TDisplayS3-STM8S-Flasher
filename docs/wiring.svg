@@ -83,7 +83,7 @@
 <text x="-109.0" y="-24.5" fill="#fff">STM8S103</text>
 <text x="-109.0" y="-3.5" fill="#fff">ihx 2816</text>
 <text x="-109.0" y="17.5" fill="#fff">pass 12 fail 0</text>
-<text x="-109.0" y="38.5" fill="#8a8a8a">192.168.0.240</text>
+<text x="-109.0" y="38.5" fill="#8a8a8a">192.168.1.50</text>
 </g>
 <rect x="96" y="434" width="20" height="20" rx="2" fill="url(#silver)"/><circle cx="106" cy="444" r="5.5" fill="#333"/>
 <text x="106" y="466" font-size="7" fill="#bbb" text-anchor="middle">BOOT</text>

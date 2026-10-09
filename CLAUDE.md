@@ -13,15 +13,18 @@ ArduinoOTA. See docs/architecture.md for the full design.
 - `make image IHX=path/to/app.ihx` — push a target firmware image to the flasher
 
 Serial debug: 115200 on /dev/ttyACM0. The jig hosts http://STM8Flasher.local/
-(live status, target .ihx upload, flasher firmware update; see
-flashing-shop.md); images persist in FFat as /firmware.ihx.
+(live status, target .ihx upload, flasher firmware update); images persist in
+FFat as /firmware.ihx. flashing-shop.md is a local, untracked note (.gitignore).
 
 ## Layout
 
 - `TDisplayS3-STM8S-Flasher.ino` — UI (2 pages: home, flash), state machine,
-  wifi/OTA/mDNS/webserver, FFat image storage. Auto mode default (no buttons on the enclosure); MODE_BUTTON
-  (GPIO0) toggles, FLASH_BUTTON (GPIO14) tests; buttons act on debounced
-  release (a press must not spill into the next page and double-fire).
+  wifi/OTA/mDNS/webserver, FFat image storage. Auto mode default (no buttons on the
+  enclosure; mode letter hidden). MODE_BUTTON (GPIO0): short press (<1 s, on
+  release) toggles auto/manual, held 5 s forgets WiFi and reboots (it can't be
+  read at power-up: GPIO0 is the boot strap). FLASH_BUTTON (GPIO14) tests;
+  tests start on debounced release (a press must not spill into the next page
+  and double-fire).
 - `swim.cpp/h` — bit-banged SWIM wire driver (entry, sync, pulse-width bits,
   parity/ACK frames, ROTF/WOTF/SRST). Cycle-counted timing in critical
   sections, direct GPIO register access.
@@ -34,15 +37,16 @@ flashing-shop.md); images persist in FFat as /firmware.ihx.
 ## Behavior contracts (user-specified, don't regress)
 
 - FAIL means verify mismatch ONLY. No target / entry failure / comm errors
-  retry quietly — never shown as FAIL. A flash that gets comm errors 3x in a
-  row shows an orange "comm error" notice (flashWithRetry), not a FAIL.
+  are never shown as FAIL. A flash that gets comm errors 3x in a row shows an
+  orange "comm error" notice (flashWithRetry), not a FAIL.
 - Home line 1 = live detected target ("no target" / STM8S103 / STM8S003 via
   UID probe at 0x4865, polled every 1 s in both modes), NOT the configured name.
 - Result holds on the flash page 1 s (pass and fail); FLASH_BUTTON during
-  the hold retests immediately.
+  the hold retests immediately. The last result word then stays on the home
+  screen (line 4) until the board is removed.
 - The jig powers the target: no VDD sensing; SWIM entry IS target detection.
-- Auto mode flashes every inserted target, once per insertion (`flashed`,
-  cleared on disconnect; comm errors leave it clear so it retries). No reading
+- Auto mode flashes every inserted target, once per insertion (`flashed`, set
+  after ANY outcome including comm error, cleared on disconnect). No reading
   of the chip's existing firmware or build id — it's a flasher, not a reader.
   Never reflash a chip that stays in the jig (S003 flash endurance is 100
   cycles).
@@ -50,12 +54,9 @@ flashing-shop.md); images persist in FFat as /firmware.ihx.
 
 ## Current state / caveats
 
-- Everything above is implemented, compiles, and is deployed to hardware; the
-  wire protocol has NOT yet flashed a real chip successfully end-to-end.
-- SWIM timing constants in swim.cpp (entry pulse pattern, 22-clock bit format,
-  sync width window) were written from memory and are UNVERIFIED against ST
-  UM0470 — that's the prime suspect for any entry/frame failures. Serial
-  logs pinpoint the failing layer (sync pulse / CSR write / unlock / EOP).
+- In production: ~50 boards flashed successfully (as of 2026-10-09). The SWIM
+  timing in swim.cpp works on real parts; if entry/frame failures ever show
+  up, serial logs pinpoint the failing layer (sync pulse / CSR write / unlock / EOP).
 - UID probe distinguishes 003/103 heuristically: blank UID ⇒ 003; present ⇒
   103-class silicon (many 003-marked dies also have it).
 - Detection probe resets the target once per second (NRST + entry) — a

@@ -1,95 +1,116 @@
-# ESP32 Standalone STM8 SWIM Flasher — Architecture
+# Architecture
 
-A production-jig flasher: a LilyGO T-Display S3 (ESP32-S3) that programs STM8 targets over SWIM with no PC in the loop. Firmware images arrive over Wi-Fi, are stored locally, and are flashed on demand (button press) with pass/fail on the board's display.
-
-**Status:** scaffolded and compiling. Wire driver, device layer, IHX parser, flash-cycle state machine, FFat image storage, and HTTP upload (`make image IHX=path`, or the form at `http://STM8Flasher.local/`) all exist. SWIM timing constants are structured but not yet hardware-verified against UM0470.
+How the jig works, as built. For setup and operation see the [README](../README.md).
 
 ## Design principle
 
-Don't invent the STM8 programming logic — **copy it from `stm8flash`**. Device register addresses and block sizes come from its `stm8.c` device table; the flash sequence follows its orchestration. But the code itself is a minimal reimplementation, not a wholesale port: this is an Arduino sketch (matching the tDisplayS3Base project style — arduino-cli, WiFiManager, ArduinoOTA, TFT_eSPI on a T-Display S3), a jig flashes one part family, and a ~150-line core is easier to own than stm8flash's CLI-shaped source tree compiled into a sketch. stm8flash remains the reference to crib each new device entry from.
+The STM8 programming logic follows [stm8flash](https://github.com/vdudouyt/stm8flash):
+register addresses and block sizes come from its `stm8.c` device table, and the
+flash sequence follows its orchestration. The code itself is a small
+reimplementation, not a port: a jig flashes one part family, and a ~150-line
+core is easier to own than stm8flash's CLI source tree compiled into a sketch.
+stm8flash remains the reference for each new device entry.
 
-The ESP32 stops being a dumb pipe (esp-stlink's role) and becomes the brain.
-
-## Layer diagram
-
-```
-┌─────────────────────────────────────────────────────┐
-│  Orchestration (flashing state machine)             │
-│  idle → detect → entry → unlock → program →         │
-│  verify → pass/fail                                 │
-├──────────────────────────┬──────────────────────────┤
-│  stm8flash core (ported) │  Management plane        │
-│  - device table (stm8.c) │  - HTTP upload endpoint  │
-│  - IHX/S19 parser        │  - manifest validation   │
-│  - program/verify logic  │  - rollback image        │
-├──────────────────────────┼──────────────────────────┤
-│  esp32swim.c backend     │  Storage (LittleFS)      │
-│  (stm8flash programmer   │  - firmware.ihx          │
-│   shim → local calls)    │  - manifest.json         │
-├──────────────────────────┤  - serial counter        │
-│  SWIM wire driver        │  - unit logs             │
-│  (ported esp-stlink      ├──────────────────────────┤
-│   swim.c: entry, sync,   │  Wi-Fi / lwIP            │
-│   ROTF, WOTF, bit-bang)  │  (core 0, idle during    │
-│  core 1, critical secs   │   flash cycles)          │
-├──────────────────────────┴──────────────────────────┤
-│  Hardware: level shifter (BSS138), 1k pull-up on    │
-│  SWIM, NRST, T-Display S3 screen + buttons          │
-└─────────────────────────────────────────────────────┘
-```
-
-## Components
-
-### SWIM wire driver (`swim/`)
-Bit-banged SWIM protocol ported from esp-stlink: entry sequence (16 kHz + 8 kHz bursts), sync pulse, pulse-width-encoded bits, byte framing with parity + ACK, ROTF/WOTF/SRST commands, low→high speed switch.
-
-Timing strategy (in escalation order — start at 1, move down only if yield rate demands it):
-1. Pin the flash task to **core 1**; Wi-Fi/lwIP stays on core 0.
-2. No Wi-Fi TX during a flash cycle (phases are naturally separate).
-3. Each byte transfer inside `portENTER_CRITICAL` — windows are short.
-4. Fallback: RMT peripheral for deterministic TX + width-measured RX.
-
-### STM8 device layer (`stm8.h/.cpp`, `ihx.h/.cpp`)
-A `stm8_device_t` table (values copied from stm8flash's `stm8.c`), the flash unlock/program/verify sequence, and an Intel HEX parser.
-
-What it does on the wire per flash cycle: SWIM entry + sync → halt core via DM → unlock flash (`0x56,0xAE` to FLASH_PUKR; `0xAE,0x56` to FLASH_DUKR for EEPROM/option bytes) → set block-program mode in FLASH_CR2 (+ complement to FLASH_NCR2 on STM8S) → WOTF block-aligned writes → poll FLASH_IAPSR → ROTF read-back verify → reset and run. Register addresses are family-specific — that's exactly why the device table is reused, not rewritten. Authoritative refs: UM0470 (SWIM), RM0016 (STM8S flash).
-
-### Orchestration (`esp32flasher.ino`)
-The jig powers the target, so there is no VDD sensing — a periodic SWIM entry attempt (every 250 ms) doubles as target detection. Per-cycle state machine:
+## Layers
 
 ```
-WAITING ──sync pulse received──▶ CONNECT (SWIM_CSR, stall core)
-  ▲  ▲                              │
-  │  │ comm error: retry quietly ◀──┼── UNLOCK → PROGRAM → VERIFY
-  │  │                                              │        │
-  │ button press                    PASS 1 s ◀── match   mismatch ──▶ FAIL 1 s
-  │  │                                │                               │
-  └──┴─────── SWAP TARGET ◀───────────┴───────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│ TDisplayS3-STM8S-Flasher.ino                                  │
+│  probe every 1 s → flash once per insertion → PASS / FAIL     │
+│  screen, buttons, WiFiManager, ArduinoOTA, web server         │
+├───────────────────────────────┬───────────────────────────────┤
+│ stm8.cpp — device layer       │ ihx.cpp — Intel HEX parser    │
+│  device table, connect, UID,  │ webpage.h — /, /status,       │
+│  flash unlock / block program │  /upload, /update             │
+│  / verify, run                │ FFat: /firmware.ihx           │
+├───────────────────────────────┴───────────────────────────────┤
+│ swim.cpp — SWIM wire driver                                   │
+│  entry + sync, bit/frame layer, ROTF / WOTF / SRST            │
+├───────────────────────────────────────────────────────────────┤
+│ GPIO1 = SWIM (1 kΩ pull-up to 3.3 V), GPIO2 = NRST            │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-FAIL means exactly one thing: the read-back didn't match the image. Everything else (no target, failed entry, write/read comm errors) retries quietly — it's a technician who hasn't hooked up yet, not a bad part. After a verdict, the button re-arms for the next board. Pass/fail counters and status live on the board's display.
+## SWIM wire driver (`swim.cpp`)
 
-Deferred manufacturing features: per-unit serial injection, option-byte programming/verify, count limit, per-unit logs.
+Bit-banged on one open-drain GPIO, with direct register access
+(`digitalWrite` is too slow for 250 ns pulses).
 
-### Storage (FFat) + upload
-The 16MB flash's FATFS partition holds `/firmware.ihx`. Upload paths (all validated — the ihx must parse cleanly before it replaces the stored image):
+- **Entry**: hold SWIM low 1 ms, then 4 pulses at 1 kHz and 4 at 2 kHz. The
+  target answers with a sync pulse of 128 SWIM clocks (about 16 µs).
+- **Per-chip timing**: the sync pulse width is measured and the bit timing is
+  derived from it (`set_timing`). The STM8's HSI is several percent off nominal
+  on real parts, which is enough to corrupt a 22-clock bit at nominal timing.
+  Widths outside 8-40 µs fail the entry.
+- **Bits**: low-speed format, 22 SWIM clocks per bit. '0' is 20 clocks low +
+  2 high, '1' is 2 low + 20 high. Received bits are decoded by low-pulse width.
+- **Frames**: host frames are a '0' header, the payload MSB first, and even
+  parity, then the target ACKs. Target frames are a header, 8 data bits and
+  parity, then the host ACKs or NAKs. Each frame runs inside a FreeRTOS
+  critical section so WiFi interrupts can't stretch a bit, and is retried up to
+  4 times on NAK. No ACK at all means the target is gone, and the frame isn't retried.
+- **Commands**: SRST (3-bit), ROTF and WOTF (3-bit command, 8-bit count, 24-bit
+  address, then data). Transfers are split into chunks of at most 255 bytes.
 
-- `make image IHX=path/to/app.ihx`
-- `curl -F ihx=@app.ihx http://STM8Flasher.local/upload`
-- browser form at `http://STM8Flasher.local/`
+## Device layer (`stm8.cpp`)
 
-On boot (and after each upload) the ihx is parsed once into a RAM buffer; each cycle flashes from the buffer. WiFi is strictly secondary: WiFiManager runs non-blocking and flashing never waits on the network.
+- **Connect** (3 attempts): assert NRST, SWIM entry, write `SWIM_CSR`
+  (mask internal resets, whole memory map visible), release NRST, stall the
+  CPU through `DM_CSR2`.
+- **Probe**: read the 96-bit unique ID at 0x4865. Present means 103-class
+  silicon, blank means 003. A heuristic only: the parts share a die and flash layout.
+- **Program**: unlock flash with 0x56, 0xAE to `FLASH_PUKR` and check
+  `IAPSR.PUL`. Then, per 64-byte block: set block-program in `FLASH_CR2` (and
+  its complement in `FLASH_NCR2`), write the block with WOTF, and wait up to
+  20 ms for `IAPSR.EOP`. EOP is cleared by reading it, so one corrupted poll can
+  eat it on a block that programmed fine: on an EOP timeout, the block is read
+  back and accepted if it matches.
+- **Verify**: ROTF read-back in 128-byte chunks, compared byte for byte.
+- **Run**: SWIM SRST. The target reboots into the new firmware.
 
-## Hardware notes
+## Orchestration (`TDisplayS3-STM8S-Flasher.ino`)
 
-- **Level shifting is mandatory**: ESP32 GPIOs are not 5 V tolerant; many STM8 boards run at 5 V. BSS138 open-drain bidirectional shifter on SWIM and NRST — fits SWIM's open-drain nature and doubles as the pull-up path.
-- **1 kΩ pull-up** on SWIM (internal pull-up too weak for the rise time).
-- The jig powers the target. Optical isolation if the line environment is electrically noisy.
+The jig powers the target, so there is no VDD sensing: a successful SWIM entry
+is the target-present detection.
+
+```
+            probe every 1 s (connect + UID; target reset each time)
+                │
+ no target ◀────┤ answered, auto mode, image loaded, not yet flashed
+ (clear flag,   ▼
+  clear result) flash cycle: connect → unlock → program → verify
+                │      up to 3 attempts while comm errors
+                ▼
+   PASS (green) │ FAIL (red, verify mismatch only) │ comm error (orange)
+                ▼
+     result held 1 s on the flash screen (KEY = retest),
+     then on the home screen until the board is removed
+                ▼
+     flag set: no reflash until the board is disconnected
+```
+
+- **FAIL means only a verify mismatch.** No target, failed entry and
+  read/write errors are communication problems and never show as FAIL.
+- **Once per insertion**: the flag is set after any outcome, including a comm
+  error, and cleared when the probe finds no target. A board left on the jig is
+  never reflashed: the STM8S003 is rated for only 100 program cycles.
+- **WiFi is secondary**: WiFiManager runs non-blocking and flashing never
+  waits on the network.
+
+## Storage and upload
+
+FFat on the 9.9 MB FATFS partition holds `/firmware.ihx`. An upload goes to a
+temp file and must parse cleanly (checksums, all data inside the target's
+flash) before it replaces the stored image. The image is parsed once into RAM
+at boot and after each upload; every flash cycle runs from RAM.
+
+## Not built (possible additions)
+
+Per-unit serial-number injection, option-byte programming and verify, a count
+limit, per-unit logs, and authentication on the web endpoints.
 
 ## References
 
-- esp-stlink — SWIM wire layer to port
-- stm8flash — device layer to retarget
-- dimitarm1/SWIM_Programmer — closest existing "MCU does the whole job" example (STM32F103)
-- ST UM0470 — SWIM protocol + debug module (authoritative timing/counts)
-- ST RM0016 — STM8S/STM8AF flash programming procedure
+- [UM0470](https://www.st.com/resource/en/user_manual/um0470-stm8-swim-communication-protocol-and-debug-module-stmicroelectronics.pdf): STM8 SWIM communication protocol and debug module
+- [RM0016](https://www.st.com/resource/en/reference_manual/rm0016-stm8s-series-and-stm8af-series-8bit-microcontrollers-stmicroelectronics.pdf): STM8S and STM8AF reference manual (flash programming)
+- [stm8flash](https://github.com/vdudouyt/stm8flash): device table and flash sequence

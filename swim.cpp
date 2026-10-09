@@ -10,8 +10,8 @@
 // After activation the target's SWIM clock is HSI/2 = 8 MHz (UM0470).
 // Low-speed bit format: 22 SWIM clocks per bit.
 //   '0' = 20 clocks low + 2 high, '1' = 2 clocks low + 20 high.
-// TODO: verify counts and the entry-sequence frequencies against UM0470
-// before trusting on hardware. Structure is right; calibrate the numbers.
+// Verified in production; bit timing is recalibrated per chip from its
+// sync pulse (see swim_entry), which absorbs HSI tolerance.
 // ---------------------------------------------------------------------------
 #define CPU_MHZ 240
 // Bit timing is recalibrated from the measured sync pulse at every entry:
@@ -193,7 +193,6 @@ bool swim_wotf(uint32_t addr, const uint8_t *buf, size_t len) {
 // Entry sequence (UM0470 §SWIM entry): wake the pin, then a recognizable
 // pulse pattern; the target hands the pin to the SWIM module and answers
 // with a sync pulse (~128 HSI clocks low, ~16 us) that we measure.
-// TODO: verify pulse counts/frequencies against UM0470 §5.3 on first hardware bring-up.
 
 bool swim_entry() {
   drv_low();
@@ -212,7 +211,7 @@ bool swim_entry() {
   uint32_t t0 = cyc();
   while (line()) {
     if (cyc() - t0 > 500 * CPU_MHZ) {
-      // no target answering is the idle condition — don't log every 250 ms poll
+      // no target answering is the idle condition — don't log every 1 s poll
       static uint32_t misses = 0;
       if (++misses % 20 == 1)
         Serial.printf("swim: entry sent, no sync pulse (attempt %lu)\n", misses);

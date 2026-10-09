@@ -1,6 +1,6 @@
 // Host-side check for the IHX parser (the only logic testable off-target).
 // Named .c.txt so arduino-cli ignores it. Run:
-//   cp test_ihx.c.txt /tmp/test_ihx.c && gcc -x c /tmp/test_ihx.c ihx.cpp -I. -o /tmp/test_ihx && /tmp/test_ihx
+//   make test
 #include <assert.h>
 #include <stdio.h>
 #include "ihx.h"
